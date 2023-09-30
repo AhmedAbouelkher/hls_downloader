@@ -9,7 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"syscall"
@@ -140,26 +140,20 @@ func main() {
 		progressbar.OptionFullWidth(),
 	)
 
-	// download segments
-	for i, segment := range segments {
-		segUrl := concatUrl(vUrl, segment.URI)
-		data, err := Get(ctx, segUrl)
-		if err != nil {
-			panic(err)
-		}
-		fName := filepath.Join(tmpDir, fmt.Sprintf("%d.ts", i))
-		func() {
-			defer bar.Add(1)
-			f, err := os.Create(fName)
-			if err != nil {
-				panic(err)
-			}
-			defer f.Close()
-			if _, err := f.Write(data); err != nil {
-				panic(err)
-			}
-			listF.WriteString(fmt.Sprintf("file '%s'\n", f.Name()))
-		}()
+	st := time.Now()
+	defer func() {
+		fmt.Println("Total time:", time.Since(st))
+	}()
+	dInput := &downloadInput{
+		variantUrl:   vUrl,
+		segments:     segments,
+		tmpDir:       tmpDir,
+		listFile:     listF,
+		progressBar:  bar,
+		numOfWorkers: runtime.NumCPU(),
+	}
+	if err := downloadSegments(ctx, dInput); err != nil {
+		panic(err)
 	}
 
 	// concat segments using ffmpeg
