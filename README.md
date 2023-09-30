@@ -2,6 +2,8 @@
 
 A simple HLS downloader written in Golang, inspired by [hls-downloader](https://github.com/tuhinpal/hls-downloader).
 
+![image showing how the tool is working](./images/image.gif)
+
 ## Dependencies
 
 - [ffmpeg](https://ffmpeg.org/)
@@ -15,4 +17,8 @@ A simple HLS downloader written in Golang, inspired by [hls-downloader](https://
 
 - Run `./exec/hls_downloader -h` to see all the available options.
 
-ENJOY!
+## Test HLS Streams
+
+You can test the downloader with the following HLS streams [Fazzani/free_m3u8.m3u](https://gist.github.com/Fazzani/8f89546e188f8086a46073dc5d4e2928)
+
+ENJOY! ❤️
