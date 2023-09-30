@@ -2,7 +2,7 @@
 
 A simple HLS downloader written in Golang, inspired by [hls-downloader](https://github.com/tuhinpal/hls-downloader).
 
-![image showing how the tool is working](./images/image.gif)
+![image showing how the tool is working](./images/downloader.gif)
 
 ## Dependencies
 
