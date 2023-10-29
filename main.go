@@ -21,8 +21,8 @@ import (
 
 func main() {
 	var u, out string
-	flag.StringVar(&u, "url", "", "URL to fetch")
-	flag.StringVar(&out, "o", "", "Output file")
+	flag.StringVar(&u, "url", "", "Master playlist direct url (required)")
+	flag.StringVar(&out, "o", "", "Output file (required)")
 	flag.Parse()
 	if u == "" || out == "" {
 		flag.Usage()

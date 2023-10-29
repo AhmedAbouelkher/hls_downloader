@@ -78,7 +78,8 @@ func downloadSegments(ctx context.Context, input *downloadInput) error {
 			segment: segment,
 		}
 	}
-	finishedTasks := []finishTask{}
+	// thread-safe map to store the finished tasks
+	cFinishedTasks := sync.Map{}
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, input.numOfWorkers)
 	for i, tsk := range tasks {
@@ -102,17 +103,42 @@ func downloadSegments(ctx context.Context, input *downloadInput) error {
 			if _, err := f.Write(data); err != nil {
 				panic(err)
 			}
-			finishedTasks = append(finishedTasks, finishTask{
+			cFinishedTasks.Store(i, finishTask{
 				task:     tsk,
 				fileName: f.Name(),
 			})
 		}(i, tsk)
 	}
 	wg.Wait()
+
+	finishedTasks := make([]finishTask, len(tasks))
+	cFinishedTasks.Range(func(key, value interface{}) bool {
+		finishedTasks[key.(int)] = value.(finishTask)
+		return true
+	})
+
+	retryCount := 5
+
+sort_tasks:
 	// sort the finished tasks by index to preserve the segments order
 	sort.Slice(finishedTasks, func(i, j int) bool {
 		return finishedTasks[i].index < finishedTasks[j].index
 	})
+	// validate the segments order
+	for i, tsk := range finishedTasks {
+		if tsk.index != i {
+			if retryCount == 0 {
+				return fmt.Errorf(
+					"download segments failed, %d against %d, %d retries exceeded",
+					i,
+					tsk.index,
+					retryCount,
+				)
+			}
+			retryCount--
+			goto sort_tasks
+		}
+	}
 	str := ""
 	for _, tsk := range finishedTasks {
 		str += fmt.Sprintf("file '%s'\n", tsk.fileName)
