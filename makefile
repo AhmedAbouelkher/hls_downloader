@@ -11,12 +11,12 @@ build_windows:
 
 build_linux:
 	@echo "Building linux exe..."
-	GOOS=linux go build -ldflags "-s -w" -o ./exec/hls_downloader main.go utils.go
+	GOOS=linux go build -ldflags "-s -w" -o ./exec/hls_downloader_linux main.go utils.go
 	@echo "Done."
 
 build_mac:
 	@echo "Building mac exe..."
-	GOOS=darwin go build -ldflags "-s -w" -o ./exec/hls_downloader_macos main.go utils.go
+	GOOS=darwin go build -ldflags "-s -w" -o ./exec/hls_downloader main.go utils.go
 	@echo "Done."
 
 build: build_windows build_linux build_mac

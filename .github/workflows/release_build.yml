@@ -4,20 +4,26 @@ on:
   push:
     branches: [ "main" ]
     tags:
-      - "*" # triggers only if push new tag version, like `0.8.4`
+      - "*"
 
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
     steps:
-      -
-        name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v3
         with:
           fetch-depth: 0
-      -
-        name: Set up Go
+      
+      - 
+        name: Setup Go
         uses: actions/setup-go@v4
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      
+      - run: go mod tidy
+      - run: go mod download && go mod verify
+
       -
         name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v5

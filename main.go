@@ -33,6 +33,17 @@ func main() {
 		panic(err)
 	}
 
+	fmt.Print(`
+-----------------------------------------------
+A simple HLS downloader written in Golang.
+This tool is not intended to be used for piracy.
+Use it at your own risk.
+
+Version: 0.0.2
+By: Ahmed M. Abouelkher
+-----------------------------------------------
+`)
+
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT)
 	defer signal.Stop(signals)
