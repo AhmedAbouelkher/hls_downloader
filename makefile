@@ -19,4 +19,7 @@ build_mac:
 	GOOS=darwin go build -ldflags "-s -w" -o ./exec/hls_downloader main.go utils.go
 	@echo "Done."
 
+build_macos: build_mac
+	cp ./exec/hls_downloader /usr/local/bin/
+
 build: build_windows build_linux build_mac

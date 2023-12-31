@@ -19,11 +19,28 @@ import (
 	"github.com/schollz/progressbar/v3"
 )
 
+var (
+	u, out          string
+	numberOfWorkers int
+	verbose         bool
+)
+
 func main() {
-	var u, out string
 	flag.StringVar(&u, "url", "", "Master playlist direct url (required)")
 	flag.StringVar(&out, "o", "", "Output file (required)")
+	flag.IntVar(&numberOfWorkers, "p", 0, "Number of workers")
+	flag.BoolVar(&verbose, "v", false, "Verbose mode")
 	flag.Parse()
+
+	fmt.Print(`-----------------------------------------------
+A simple HLS downloader written in Golang.
+This tool is not intended to be used for piracy.
+Use it at your own risk.
+
+Version: 0.0.5
+By: Ahmed M. Abouelkher
+-----------------------------------------------
+`)
 	if u == "" || out == "" {
 		flag.Usage()
 		return
@@ -32,17 +49,13 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-
-	fmt.Print(`
------------------------------------------------
-A simple HLS downloader written in Golang.
-This tool is not intended to be used for piracy.
-Use it at your own risk.
-
-Version: 0.0.2
-By: Ahmed M. Abouelkher
------------------------------------------------
-`)
+	// validate the output file name
+	if _, err := os.Stat(out); err == nil {
+		panic("Output file already exists")
+	}
+	if !strings.HasSuffix(out, ".mp4") {
+		panic("Output file must be a mp4 file")
+	}
 
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT)
@@ -106,12 +119,13 @@ By: Ahmed M. Abouelkher
 	fmt.Print("Select variant: ")
 	fmt.Scanln(&variantId)
 	if variantId < 0 || variantId >= len(variants) {
-		panic("Invalid variant")
+		panic("Invalid variant id")
 	}
 	variant := variants[variantId]
 	vUrl := concatUrl(uri, variant.URI)
-
-	fmt.Println("Fetching variant playlist:", vUrl)
+	if verbose {
+		fmt.Println("Fetching variant playlist:", vUrl)
+	}
 
 	vPlaylistD, err := Get(ctx, vUrl)
 	if err != nil {
@@ -155,25 +169,40 @@ By: Ahmed M. Abouelkher
 	defer func() {
 		fmt.Println("Total time:", time.Since(st))
 	}()
+
+	nWorkers := len(segments) / runtime.NumCPU()
+	if nWorkers == 0 {
+		nWorkers = 1
+	}
+	if numberOfWorkers > 0 {
+		nWorkers = numberOfWorkers
+	}
+	if verbose {
+		fmt.Printf("Number of workers: %d\n", nWorkers)
+	}
+
 	dInput := &downloadInput{
 		variantUrl:   vUrl,
 		segments:     segments,
 		tmpDir:       tmpDir,
 		listFile:     listF,
 		progressBar:  bar,
-		numOfWorkers: runtime.NumCPU(),
+		numOfWorkers: nWorkers,
 	}
 	if err := downloadSegments(ctx, dInput); err != nil {
 		panic(err)
 	}
 
-	// concat segments using ffmpeg
-	cmd := fmt.Sprintf("ffmpeg -y -f concat -safe 0 -i %s -c copy %s", listF.Name(), out)
-	args := strings.Split(cmd, " ")
 	fmt.Println("Stitching segments...")
-	output, err := exec.CommandContext(ctx, args[0], args[1:]...).CombinedOutput()
+
+	// concat segments using ffmpeg
+	rawArgs := fmt.Sprintf("-v error -y -f concat -safe 0 -i %s -c copy %s", listF.Name(), out)
+	output, err := exec.CommandContext(
+		ctx,
+		"ffmpeg",
+		strings.Split(rawArgs, " ")...).CombinedOutput()
 	if err != nil {
-		fmt.Println(string(output))
+		fmt.Println("FFmpeg Error:", string(output))
 		panic(err)
 	}
 

@@ -23,6 +23,9 @@ jobs:
       
       - run: go mod tidy
       - run: go mod download && go mod verify
+      # print GITHUB_TOKEN
+      - run: echo $GITHUB_TOKEN
+
 
       -
         name: Run GoReleaser

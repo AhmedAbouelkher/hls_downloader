@@ -3,6 +3,7 @@ module hls_downloader
 go 1.20
 
 require (
+	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/grafov/m3u8 v0.12.0
 	github.com/schollz/progressbar/v3 v3.13.1
 )

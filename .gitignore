@@ -33,3 +33,6 @@ exec/
 .vscode
 *.mp4
 *.txt
+*.m3u8
+*.m3u
+playground

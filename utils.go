@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,9 +12,15 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/grafov/m3u8"
 	"github.com/schollz/progressbar/v3"
+)
+
+var (
+	EmptySegmentError = fmt.Errorf("empty segment")
 )
 
 func concatUrl(base *url.URL, path string) *url.URL {
@@ -48,6 +55,27 @@ func Get(ctx context.Context, uri *url.URL) ([]byte, error) {
 	return data, nil
 }
 
+func DownloadSegment(ctx context.Context, uri *url.URL, fileName string) error {
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	data, err := Get(ctx, uri)
+	if err != nil {
+		return err
+	}
+	if len(data) == 0 {
+		return EmptySegmentError
+	}
+	f, err := os.Create(fileName)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if _, err := f.Write(data); err != nil {
+		return err
+	}
+	return nil
+}
+
 type task struct {
 	index   int
 	segment *m3u8.MediaSegment
@@ -67,9 +95,6 @@ type downloadInput struct {
 	numOfWorkers int
 }
 
-// downloadSegments downloads the segments in parallel, and writes them to the listFile as they are downloaded.
-// download 10 segments at a time
-// segments order must be preserved when writing to the listFile
 func downloadSegments(ctx context.Context, input *downloadInput) error {
 	tasks := make([]task, len(input.segments))
 	for i, segment := range input.segments {
@@ -91,21 +116,19 @@ func downloadSegments(ctx context.Context, input *downloadInput) error {
 			defer input.progressBar.Add(1)
 			fName := filepath.Join(input.tmpDir, fmt.Sprintf("%d.ts", i))
 			uri := concatUrl(input.variantUrl, tsk.segment.URI)
-			data, err := Get(ctx, uri)
+			err := backoff.Retry(func() error {
+				return DownloadSegment(ctx, uri, fName)
+			}, backoff.WithContext(backoff.NewExponentialBackOff(), ctx))
 			if err != nil {
-				panic(err)
-			}
-			f, err := os.Create(fName)
-			if err != nil {
-				panic(err)
-			}
-			defer f.Close()
-			if _, err := f.Write(data); err != nil {
-				panic(err)
+				if errors.Is(err, context.Canceled) {
+					return
+				}
+				fmt.Printf("download segment %d failed: %s\n", i, err)
+				return
 			}
 			cFinishedTasks.Store(i, finishTask{
 				task:     tsk,
-				fileName: f.Name(),
+				fileName: fName,
 			})
 		}(i, tsk)
 	}
