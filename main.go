@@ -5,6 +5,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log"
 	"net/url"
 	"os"
 	"os/exec"
@@ -20,41 +21,56 @@ import (
 )
 
 var (
-	u, out          string
-	numberOfWorkers int
-	verbose         bool
+	u, out              string
+	numberOfWorkers     int
+	overrideCurrentFile bool
+	alwaysHightest      bool
+	verbose             bool
 )
 
 func main() {
 	flag.StringVar(&u, "url", "", "Master playlist direct url (required)")
-	flag.StringVar(&out, "o", "", "Output file (required)")
-	flag.IntVar(&numberOfWorkers, "p", 0, "Number of workers")
+	flag.StringVar(&out, "o", "", "Output file (mp4 format) (default: timestamp.mp4)")
+	flag.IntVar(&numberOfWorkers, "p", 0, "Number of workers, if 0, number of CPU cores will be used")
+	flag.BoolVar(&overrideCurrentFile, "f", false, "Override output file if exists")
+	flag.BoolVar(&alwaysHightest, "h", true, "Always select highest bitrate variant")
 	flag.BoolVar(&verbose, "v", false, "Verbose mode")
 	flag.Parse()
 
-	fmt.Print(`-----------------------------------------------
-A simple HLS downloader written in Golang.
-This tool is not intended to be used for piracy.
-Use it at your own risk.
-
-Version: 0.0.5
-By: Ahmed M. Abouelkher
------------------------------------------------
-`)
-	if u == "" || out == "" {
+	if u == "" {
 		flag.Usage()
 		return
 	}
+
+	// ensure ffmpeg is installed and runnable
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		fmt.Fprintln(os.Stderr, "ffmpeg not found in PATH. Please install ffmpeg: https://ffmpeg.org/download.html")
+		os.Exit(1)
+	}
+	// sanity-check ffmpeg can be executed
+	if out, err := exec.Command("ffmpeg", "-version").CombinedOutput(); err != nil {
+		fmt.Fprintln(os.Stderr, "ffmpeg was found but failed to run:", err)
+		fmt.Fprintln(os.Stderr, "ffmpeg output:")
+		fmt.Fprintln(os.Stderr, string(out))
+		os.Exit(1)
+	}
+
 	uri, err := url.Parse(u)
 	if err != nil {
-		panic(err)
+		log.Panicln(err)
 	}
+
+	if out == "" {
+		now := time.Now()
+		out = now.Format("20060102_150405") + ".mp4"
+	}
+
 	// validate the output file name
-	if _, err := os.Stat(out); err == nil {
-		panic("Output file already exists")
+	if _, err := os.Stat(out); err == nil && !overrideCurrentFile {
+		log.Panicln("Output file already exists, use -f to override")
 	}
 	if !strings.HasSuffix(out, ".mp4") {
-		panic("Output file must be a mp4 file")
+		log.Panicln("Output file must be a mp4 file")
 	}
 
 	signals := make(chan os.Signal, 1)
@@ -66,9 +82,13 @@ By: Ahmed M. Abouelkher
 
 	tmpDir, err := os.MkdirTemp("", "hls_downloader")
 	if err != nil {
-		panic(err)
+		log.Panicln(err)
 	}
 	defer os.RemoveAll(tmpDir)
+
+	if verbose {
+		log.Println("Created temporary directory:", tmpDir)
+	}
 
 	go func() {
 		<-signals
@@ -77,16 +97,17 @@ By: Ahmed M. Abouelkher
 		os.Exit(1)
 	}()
 
-	fmt.Println("Fetching playlist...")
+	log.Println("Fetching playlist...")
 
 	data, err := Get(ctx, uri)
 	if err != nil {
-		panic(err)
+		log.Panicln(err)
 	}
+
 	buf := bufio.NewReader(strings.NewReader(string(data)))
 	p, listType, err := m3u8.DecodeFrom(buf, false)
 	if err != nil {
-		panic(err)
+		log.Panicln(err)
 	}
 
 	var masterpl *m3u8.MasterPlaylist
@@ -99,12 +120,16 @@ By: Ahmed M. Abouelkher
 	}
 
 	variants := masterpl.Variants
+	if len(variants) == 0 {
+		log.Panicln("No variants found in master playlist")
+	}
+
 	// sort variants by bandwidth
 	sort.Slice(variants, func(i, j int) bool {
 		return variants[i].VariantParams.Bandwidth > variants[j].VariantParams.Bandwidth
 	})
 
-	fmt.Println("Available Variants:")
+	log.Println("Available Variants:")
 	for i, variant := range variants {
 		name := variant.VariantParams.Name
 		if name == "" {
@@ -113,28 +138,36 @@ By: Ahmed M. Abouelkher
 		if name == "" {
 			name = fmt.Sprintf("%d", variant.VariantParams.Bandwidth)
 		}
-		fmt.Printf("%d: %s\n", i, name)
+		log.Printf("%d: %s\n", i, name)
 	}
 	var variantId int
-	fmt.Print("Select variant: ")
-	fmt.Scanln(&variantId)
-	if variantId < 0 || variantId >= len(variants) {
-		panic("Invalid variant id")
+
+	if alwaysHightest {
+		variantId = 0
+		log.Printf("Automatically selected highest bitrate variant: %d\n", variantId)
+	} else {
+		fmt.Print("Select variant: ")
+		fmt.Scanln(&variantId)
+		if variantId < 0 || variantId >= len(variants) {
+			panic("Invalid variant id")
+		}
 	}
+
 	variant := variants[variantId]
+
 	vUrl := concatUrl(uri, variant.URI)
 	if verbose {
-		fmt.Println("Fetching variant playlist:", vUrl)
+		log.Println("Fetching variant playlist:", vUrl)
 	}
 
 	vPlaylistD, err := Get(ctx, vUrl)
 	if err != nil {
-		panic(err)
+		log.Panicln(err)
 	}
 	vPlaylistBuf := bufio.NewReader(strings.NewReader(string(vPlaylistD)))
 	p, _, err = m3u8.DecodeFrom(vPlaylistBuf, false)
 	if err != nil {
-		panic(err)
+		log.Panicln(err)
 	}
 
 	mediapl := p.(*m3u8.MediaPlaylist)
@@ -148,7 +181,7 @@ By: Ahmed M. Abouelkher
 
 	listF, err := os.CreateTemp(tmpDir, "list")
 	if err != nil {
-		panic(err)
+		log.Panicln(err)
 	}
 	defer listF.Close()
 
@@ -167,7 +200,7 @@ By: Ahmed M. Abouelkher
 
 	st := time.Now()
 	defer func() {
-		fmt.Println("Total time:", time.Since(st))
+		log.Println("Total time:", time.Since(st))
 	}()
 
 	nWorkers := len(segments) / runtime.NumCPU()
@@ -178,10 +211,11 @@ By: Ahmed M. Abouelkher
 		nWorkers = numberOfWorkers
 	}
 	if verbose {
-		fmt.Printf("Number of workers: %d\n", nWorkers)
+		log.Printf("Number of workers: %d\n", nWorkers)
 	}
 
 	dInput := &downloadInput{
+		playlistKey:  mediapl.Key,
 		variantUrl:   vUrl,
 		segments:     segments,
 		tmpDir:       tmpDir,
@@ -190,10 +224,10 @@ By: Ahmed M. Abouelkher
 		numOfWorkers: nWorkers,
 	}
 	if err := downloadSegments(ctx, dInput); err != nil {
-		panic(err)
+		log.Panicln(err)
 	}
 
-	fmt.Println("Stitching segments...")
+	log.Println("Stitching segments...")
 
 	// concat segments using ffmpeg
 	rawArgs := fmt.Sprintf("-v error -y -f concat -safe 0 -i %s -c copy %s", listF.Name(), out)
@@ -202,9 +236,9 @@ By: Ahmed M. Abouelkher
 		"ffmpeg",
 		strings.Split(rawArgs, " ")...).CombinedOutput()
 	if err != nil {
-		fmt.Println("FFmpeg Error:", string(output))
-		panic(err)
+		log.Println("FFmpeg Error:", string(output))
+		log.Panicln(err)
 	}
 
-	fmt.Println("Done!, output file:", out)
+	log.Println("Done!, output file:", out)
 }

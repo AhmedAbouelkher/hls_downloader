@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -20,7 +24,7 @@ import (
 )
 
 var (
-	EmptySegmentError = fmt.Errorf("empty segment")
+	ErrEmptySegment = fmt.Errorf("empty segment")
 )
 
 func concatUrl(base *url.URL, path string) *url.URL {
@@ -48,6 +52,9 @@ func Get(ctx context.Context, uri *url.URL) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to get %s: status code %d", uri.String(), resp.StatusCode)
+	}
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
@@ -63,7 +70,7 @@ func DownloadSegment(ctx context.Context, uri *url.URL, fileName string) error {
 		return err
 	}
 	if len(data) == 0 {
-		return EmptySegmentError
+		return ErrEmptySegment
 	}
 	f, err := os.Create(fileName)
 	if err != nil {
@@ -87,6 +94,7 @@ type finishTask struct {
 }
 
 type downloadInput struct {
+	playlistKey  *m3u8.Key
 	variantUrl   *url.URL
 	segments     []*m3u8.MediaSegment
 	tmpDir       string
@@ -103,6 +111,24 @@ func downloadSegments(ctx context.Context, input *downloadInput) error {
 			segment: segment,
 		}
 	}
+
+	var playlistKeyBody []byte
+	if k := input.playlistKey; k != nil && k.Method == "AES-128" {
+		keyUri := concatUrl(input.variantUrl, k.URI)
+		body, err := Get(ctx, keyUri)
+		if err != nil {
+			return fmt.Errorf("failed to get decryption key: %w", err)
+		}
+		playlistKeyBody = body
+		if verbose {
+			log.Printf("Decryption key fetched from %s\n", keyUri.String())
+		}
+	}
+
+	if verbose {
+		log.Printf("Total segments to download: %d\n", len(tasks))
+	}
+
 	// thread-safe map to store the finished tasks
 	cFinishedTasks := sync.Map{}
 	var wg sync.WaitGroup
@@ -113,9 +139,16 @@ func downloadSegments(ctx context.Context, input *downloadInput) error {
 		go func(i int, tsk task) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			defer input.progressBar.Add(1)
+			if !verbose {
+				defer input.progressBar.Add(1)
+			}
+
 			fName := filepath.Join(input.tmpDir, fmt.Sprintf("%d.ts", i))
 			uri := concatUrl(input.variantUrl, tsk.segment.URI)
+			if verbose {
+				log.Printf("Downloading segment %d/%d: %s\n", i, len(input.segments), uri.String())
+			}
+
 			err := backoff.Retry(func() error {
 				return DownloadSegment(ctx, uri, fName)
 			}, backoff.WithContext(backoff.NewExponentialBackOff(), ctx))
@@ -123,9 +156,50 @@ func downloadSegments(ctx context.Context, input *downloadInput) error {
 				if errors.Is(err, context.Canceled) {
 					return
 				}
-				fmt.Printf("download segment %d failed: %s\n", i, err)
+				log.Printf("download segment %d failed: %s\n", i, err)
 				return
 			}
+
+			encKey := input.playlistKey
+			keyBody := playlistKeyBody
+			if tk := tsk.segment.Key; tk != nil {
+				encKey = tk
+				if k := input.playlistKey; k != nil && k.Method == "AES-128" {
+					keyUri := concatUrl(input.variantUrl, k.URI)
+					body, err := Get(ctx, keyUri)
+					if err != nil {
+						fmt.Printf("failed to get decryption key: %v", err)
+						return
+					}
+					keyBody = body
+					if verbose {
+						log.Printf("Segment Decryption key fetched from %s\n", keyUri.String())
+					}
+
+				}
+			}
+
+			// handle decryption if needed
+			if len(keyBody) > 0 {
+				segmentData, err := os.ReadFile(fName)
+				if err != nil {
+					log.Printf("read segment %d for decryption failed: %s\n", i, err)
+					return
+				}
+				decryptedData, err := decryptAES128CBC(keyBody, encKey.IV, segmentData)
+				if err != nil {
+					log.Printf("decrypt segment %d failed: %s\n", i, err)
+					return
+				}
+				if err := os.WriteFile(fName, decryptedData, 0644); err != nil {
+					log.Printf("write decrypted segment %d failed: %s\n", i, err)
+					return
+				}
+				if verbose {
+					log.Printf("Segment %d decrypted\n", i)
+				}
+			}
+
 			cFinishedTasks.Store(i, finishTask{
 				task:     tsk,
 				fileName: fName,
@@ -170,4 +244,33 @@ sort_tasks:
 		return err
 	}
 	return nil
+}
+
+func decryptAES128CBC(keyBody []byte, rawIv string, segmentBody []byte) ([]byte, error) {
+	if len(rawIv) >= 2 && rawIv[0:2] == "0x" {
+		rawIv = rawIv[2:]
+	}
+	iv, err := hex.DecodeString(rawIv)
+	if err != nil {
+		return nil, err
+	}
+
+	block, err := aes.NewCipher(keyBody)
+	if err != nil {
+		return nil, err
+	}
+	if len(segmentBody)%aes.BlockSize != 0 {
+		return nil, err
+	}
+
+	mode := cipher.NewCBCDecrypter(block, iv)
+	plaintext := make([]byte, len(segmentBody))
+	mode.CryptBlocks(plaintext, segmentBody)
+	// Now remove PKCS#7 padding:
+	padLen := int(plaintext[len(plaintext)-1])
+	if padLen > 0 && padLen <= aes.BlockSize {
+		plaintext = plaintext[:len(plaintext)-padLen]
+	}
+
+	return plaintext, nil
 }
