@@ -53,7 +53,6 @@ This will create an `exec` folder with the compiled binary.
 
 | Flag | Description | Default |
 |------|-------------|---------|
-
 | `-url` | Master playlist direct URL (required) | - |
 | `-o` | Output file path (mp4 format) | `timestamp.mp4` |
 | `-p` | Number of concurrent workers | Number of CPU cores |
