@@ -236,11 +236,11 @@ sort_tasks:
 			goto sort_tasks
 		}
 	}
-	str := ""
+	var str strings.Builder
 	for _, tsk := range finishedTasks {
-		str += fmt.Sprintf("file '%s'\n", tsk.fileName)
+		fmt.Fprintf(&str, "file '%s'\n", tsk.fileName)
 	}
-	if _, err := input.listFile.WriteString(str); err != nil {
+	if _, err := input.listFile.WriteString(str.String()); err != nil {
 		return err
 	}
 	return nil
