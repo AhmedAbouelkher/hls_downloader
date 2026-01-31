@@ -57,7 +57,7 @@ This will create an `exec` folder with the compiled binary.
 | `-o` | Output file path (mp4 format) | `timestamp.mp4` |
 | `-p` | Number of concurrent workers | Number of CPU cores |
 | `-f` | Override output file if it exists | `false` |
-| `-h` | Always select highest bitrate variant | `true` |
+| `-h` | Always select highest bitrate variant | `false` |
 | `-v` | Enable verbose logging mode | `false` |
 
 ### Examples
@@ -65,7 +65,7 @@ This will create an `exec` folder with the compiled binary.
 **Download with automatic highest quality:**
 
 ```bash
-./exec/hls_downloader -url "https://live-hls-abr-cdn.livepush.io/live/bigbuckbunnyclip/index.m3u8" -o video.mp4
+./exec/hls_downloader -url "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8" -o video.mp4
 ```
 
 **Download with custom worker count:**
@@ -90,7 +90,7 @@ This will create an `exec` folder with the compiled binary.
 
 You can test the downloader with the following HLS streams:
 
-- **Example Stream**: [Big Buck Bunny Clip](https://live-hls-abr-cdn.livepush.io/live/bigbuckbunnyclip/index.m3u8)
+- **Example Stream**: [Big Buck Bunny Clip](https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8)
 - **More Test Streams**: [Fazzani/free_m3u8.m3u](https://gist.github.com/Fazzani/8f89546e188f8086a46073dc5d4e2928)
 
 ## How It Works

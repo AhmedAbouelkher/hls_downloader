@@ -33,7 +33,7 @@ func main() {
 	flag.StringVar(&out, "o", "", "Output file (mp4 format) (default: timestamp.mp4)")
 	flag.IntVar(&numberOfWorkers, "p", 0, "Number of workers, if 0, number of CPU cores will be used")
 	flag.BoolVar(&overrideCurrentFile, "f", false, "Override output file if exists")
-	flag.BoolVar(&alwaysHightest, "h", true, "Always select highest bitrate variant")
+	flag.BoolVar(&alwaysHightest, "h", false, "Always select highest bitrate variant")
 	flag.BoolVar(&verbose, "v", false, "Verbose mode")
 	flag.Parse()
 
